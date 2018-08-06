@@ -102,13 +102,13 @@ class InsStar(object):
             if self._is_loadable:
                 self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
                 time.sleep(1)
-                self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
                 btn_more = self.browser.find_element_by_css_selector('div#loadMore button.btn')
                 INFO('loadable')
                 try:
+                    self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
                     btn_more.click()
                     INFO('clicked load')
-                    time.sleep(2)
+                    time.sleep(1)
                     return 1
                 except EX.ElementNotVisibleException:
                     WARN(traceback.format_exc())
@@ -121,7 +121,7 @@ class InsStar(object):
                 try:
                     _loading = self.browser.find_element_by_css_selector('div#loadMore div.dropload-load span.loading')
                 except EX.NoSuchElementException:
-                    continue
+                    return 1
                 else:
                     try:
                         self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
@@ -138,7 +138,7 @@ class InsStar(object):
             self.Load()
     
     '''加载直到某个item的data-src出现'''
-    def LoadUntil(self, bp):
+    def LoadUntil(self):
         downloaded = self.Downloaded
         last_found = ''
         while not self._is_loadfinish:
@@ -153,34 +153,33 @@ class InsStar(object):
                     self.download_info['dn-first'] = last_found
                     return 1
             
-
-
     '''判断该项是否是视频'''
-    def IsVideo(self, item):
+    def IsVideo(self, img_wrap):
         try:
-            item.find_element_by_css_selector('img.videocam')
-            LOG('found video')
+            img_wrap.find_element_by_css_selector('img.videocam')
+            INFO('Found Video')
             return True
         except EX.NoSuchElementException:
             return False
 
     '''等待视频加载，并返回source'''
     def WaitVideo(self):
-        LOG('wait for video load..........')
+        INFO('Wait For Video Load..........')
         # 等待视频加载出来后才有video标签
         while True:
             try:
-                video = self.browser.find_element_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper video source')
+                video = self.browser.find_element_by_css_selector('div#gallery-modal div.img-container div.article video source')
+                INFO('Video Loaded')
                 return video
             except EX.NoSuchElementException:
                 time.sleep(2)
                 continue
 
     '''判断是否是图片组'''
-    def IsGroup(self, item):
+    def IsGroup(self, img_wrap):
         try:
-            item.find_element_by_css_selector('img.sidecar')
-            LOG('found group')
+            img_wrap.find_element_by_css_selector('img.sidecar')
+            INFO('Found Group')
             return True
         except EX.NoSuchElementException:
             return False
@@ -194,110 +193,52 @@ class InsStar(object):
         self.browser.execute_script(scriptn)
         group_next = self.browser.find_element_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper div.slides-controler a.next')
         group_next.click()
-        LOG('load group next....')
+        INFO("Loading Group's Next One.......")
 
     '''下载视频'''
     def DownloadVideo(self):
         video_url = self.WaitVideo().get_attribute('src')
-        name = video_url.split('/')[-1]
+        name = video_url.split('/')[-1].split('?')[0]
         data = self.RequestData(video_url)
-        LOG(F'Video Donwloaded: {name}')
-        return (name, data)
+        Utils.SaveMedia(self.md5, name, data)
+        INFO(F'Video Donwloaded: {name}')
 
     '''下载图片组'''
     def DownloadGroup(self):
-        tmp = []
         while True:
             name, data = self.DownloadSingle()
-            LOG(F'Group Downloaded: {name}')
-            tmp.append((name, data))
+            Utils.SaveMedia(self.md5, name, data)
+            INFO(F'One of Group Downloaded: {name}')
             lis = self.browser.find_elements_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper ol.carousel-indicators li')
             if 'active' in lis[-1].get_attribute('class'):
+                INFO('Group Download Finish')
                 break
             self.GroupNext()
-        return tmp
 
     '''下载单个图片'''
     def DownloadSingle(self):
         img_url = self.browser.find_element_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper img').get_attribute('src')
-        name = img_url.split('/')[-1]
+        name = img_url.split('/')[-1].split('?')[0]
         data = self.RequestData(img_url)
         return (name, data)
 
-    '''启动下载'''
-    def StartDownload(self):
-        LOG('Start Download')
-        dn_last = self.download_info['dn-last']
-        if dn_last == 'null':# 第一次下载该用户
-            LOG(F'First Download This User: <{self.user}>')
-            self.LoadAll()  # 一次性将所有的项目加载完
-            items = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item')
-            items.reverse()
-            self.download_info['dn-last'] = items[0].find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
-            Utils.UpdateUserInfo(self.md5, self.download_info)
-            try:
-                for item in items:
-                    item.find_element_by_css_selector('div.img-wrap').find_element_by_css_selector('img.thumb').click() # 打开modal
-                    if self.IsVideo(item):
-                        name, data = self.DownloadVideo()
-                        Utils.SaveMedia(self.md5, name, data)
-                    elif self.IsGroup(item):
-                        nd_list = self.DownloadGroup()
-                        for name, data in nd_list:
-                            Utils.SaveMedia(self.md5, name, data)
-                    else:
-                        name, data = self.DownloadSingle()
-                        Utils.SaveMedia(self.md5, name, data)
-                    # 关闭modal
-                    self.browser.find_element_by_css_selector('div#gallery-modal button.btn-close').click()
-                    LOG('Modal Closed')
-                    self.download_info['dn-first'] = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
-                    time.sleep(1)
-                self.download_info['is-dn-finish'] = 'yes'
-                LOG('All Dwonload Finished')
-                self.browser.quit()
-            except Exception:
-                LOG('Download Broken')
-                LOG(traceback.format_exc())
-            finally:
-                Utils.UpdateUserInfo(self.md5, self.download_info)
-        elif self.download_info['is-dn-finish'] == 'not': # 如果不是第一次下载，且上一次还没有下载完
-            LOG(F"BreakPoint: {self.download_info['dn-first']}")
-            self.LoadUntil() # 加载到上次的断点
-            items = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item')
-            items.reverse()
-            self.download_info['dn-last'] = self.download_info['dn-first']
-            try:
-                new_items = []
-                for item in items:
-                    name = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
-                    if self.download_info['dn-last'] != name:
-                        new_items.append(item)
-                for item in new_items:
-                    item.find_element_by_css_selector('div.img-wrap').find_element_by_css_selector('img.thumb').click() # 打开modal
-                    if self.IsVideo(item):
-                        name, data = self.DownloadVideo()
-                        Utils.SaveMedia(self.md5, name, data)
-                    elif self.IsGroup(item):
-                        nd_list = self.DownloadGroup()
-                        for name, data in nd_list:
-                            Utils.SaveMedia(self.md5, name, data)
-                    else:
-                        name, data = self.DownloadSingle()
-                        Utils.SaveMedia(self.md5, name, data)
-                    # 关闭modal
-                    self.browser.find_element_by_css_selector('div#gallery-modal button.btn-close').click()
-                    LOG('Modal Closed')
-                    self.download_info['dn-first'] = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
-                    time.sleep(1)
-                self.download_info['is-dn-finish'] = 'yes'
-                LOG('All Dwonload Finished')
-                self.browser.quit()
-            except Exception:
-                LOG('Download Broken')
-                LOG(traceback.format_exc())
-            finally:
-                Utils.UpdateUserInfo(self.md5, self.download_info)
+    def _download(self, items):
+        for item in items:
+            self._open_modal(item) # 打开modal
+            if self.IsVideo(item):
+                self.DownloadVideo()
+            elif self.IsGroup(item):
+                self.DownloadGroup()
+            else:
+                name, data = self.DownloadSingle()
+                Utils.SaveMedia(self.md5, name, data)
+                INFO('Pic Downloaded')
+            self._close_modal() # 关闭modal
+            self.download_info['dn-first'] = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
+            time.sleep(1)
+        self.download_info['is-dn-finish'] = 'yes'
+        INFO('All Dwonload Finished')
+        self.browser.quit()
 
     def RequestData(self, url):
         headers = {
@@ -312,6 +253,74 @@ class InsStar(object):
         req = urllib.request.Request(url=url, headers=headers)
         data = urllib.request.urlopen(req).read()
         return data
+
+    def _open_modal(self, item):
+        try:
+            img_wrap = item.find_element_by_css_selector('div.img-wrap')
+            thumb = img_wrap.find_element_by_css_selector('img.thumb')
+            thumb.click()
+            time.sleep(1)
+            INFO('Modal Opened')
+        except EX.NoSuchElementException:
+            WARN('Modal Open Failed')
+            exit(0)
+        except EX.ElementClickInterceptedException:
+            WARN('Thumb Unclickable')
+            exit(0)
+        except EX.ElementNotVisibleException:
+            WARN('Element Not Visible')
+            exit(0)
+
+    def _close_modal(self):
+        try:
+            btn_close = self.browser.find_element_by_css_selector('div#gallery-modal button.btn-close')
+            btn_close.click()
+            INFO('Modal Closed')
+        except EX.NoSuchElementException:
+            WARN("Can't find modal's close button")
+        except EX.ElementClickInterceptedException:
+            WARN('Close button Unclickable')
+            exit(0)
+        except EX.ElementNotVisibleException:
+            WARN('CLose button not visible')
+            exit(0)
+
+    '''启动下载'''
+    def StartDownload(self):
+        INFO('Start Download')
+        dn_last = self.download_info['dn-last']
+        if dn_last == 'null':# 第一次下载该用户
+            INFO(F'First Download This User: <{self.user}>')
+            self.LoadAll() # 一次性将所有的项目加载完
+            items = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item')
+            items.reverse()
+            self.download_info['dn-last'] = items[0].find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
+            Utils.UpdateUserInfo(self.md5, self.download_info)
+            try:
+                self._download(items)
+            except Exception:
+                WARN('Download Broken')
+                WARN(traceback.format_exc())
+            finally:
+                Utils.UpdateUserInfo(self.md5, self.download_info)
+        elif self.download_info['is-dn-finish'] == 'not': # 如果不是第一次下载，且上一次还没有下载完
+            INFO(F"BreakPoint: {self.download_info['dn-first']}")
+            self.LoadUntil() # 加载到上次的断点
+            items = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item')
+            items.reverse()
+            self.download_info['dn-last'] = self.download_info['dn-first']
+            try:
+                new_items = []
+                for item in items:
+                    name = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
+                    if self.download_info['dn-last'] != name:
+                        new_items.append(item)
+                self._download(new_items)
+            except Exception:
+                WARN('Download Broken')
+                WARN(traceback.format_exc())
+            finally:
+                Utils.UpdateUserInfo(self.md5, self.download_info)
 
 
 if __name__ == '__main__':
