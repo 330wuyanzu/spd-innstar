@@ -8,9 +8,6 @@
 
 from selenium import webdriver
 import selenium.common.exceptions as EX
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 import urllib
 import time
 #from requests_html import HTML
@@ -26,8 +23,6 @@ import utils
 
 Utils = utils.Utils
 LOG = utils.LOG
-INFO = utils.INFO
-WARN = utils.WARN
 NULL = 'null'
 
 class InsStar(object):
@@ -43,117 +38,115 @@ class InsStar(object):
     '''打开用户页面,http://www.insstar.cn/{user}'''
     def BrowseUser(self):
         url = F'http://www.insstar.cn/{self.user}'
-        self.browser.get(url)
         try:
-            _x = WebDriverWait(self.browser, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'div#loadMore button.btn')))
-            self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
-        except EX.TimeoutException:
-            self.browser.quit()
-        else:
+            self.browser.get(url)
             self.browser.maximize_window()
+        except Exception as ex:
+            print(ex.__str__())
+            exit(0)
 
-    '''所有已下载的文件名'''
-    @property
-    def Downloaded(self):
-        tmp = []
-        path = pathlib.Path(F'../downloaded/{self.md5}')
-        tmp.extend(list(path.glob('*.mp4')))
-        tmp.extend(list(path.glob('*.jpg')))
-        tmp.extend(list(path.glob('*.jpeg')))
-        tmp.extend(list(path.glob('*.png')))
-        x = []
-        for item in tmp:
-            x.append(item.as_posix().split('./')[-1])
-        return x
-    
-    '''是否可以加载'''
-    @property
-    def _is_loadable(self):
-        try:
-            _btn_more = self.browser.find_element_by_css_selector('div#loadMore button.btn')
-        except EX.NoSuchElementException:
-            return False
-        else:
-            return True
-    
-    '''是否正在加载'''
-    @property
-    def _is_loading(self):
-        try:
-            _loading = self.browser.find_element_by_css_selector('div#loadMore div.dropload-load span.loading')
-        except EX.NoSuchElementException:
-            return False
-        else:
-            return True
-    
-    '''是否全部加载完毕'''
-    @property
-    def _is_loadfinish(self):
-        try:
-            _finish = self.browser.find_element_by_css_selector('div#loadMore div.dropload-down div.dropload-noData')
-        except EX.NoSuchElementException:
-            return False
-        else:
-            True
-
-    '''加载一次'''
     def Load(self):
         while True:
-            if self._is_loadable:
-                self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(1)
-                self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+            self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+            btn_more = NULL
+            try: # 看是不是可以load more
                 btn_more = self.browser.find_element_by_css_selector('div#loadMore button.btn')
-                INFO('loadable')
+            except EX.NoSuchElementException:# 如果不能load more，那么可能是loading或finish
+                try: # 看是不是loading
+                    _loading = self.browser.find_element_by_css_selector('div#loadMore div.dropload-load span.loading')
+                except EX.NoSuchElementException:# 如果没有loading，那么可能是finish或more loaded
+                    try: # 看是不是finished
+                        _finish = self.browser.find_element_by_css_selector('div#loadMore div.dropload-down div.dropload-noData')
+                    except EX.NoSuchElementException:# 如果没有finish，那么可能是more loaded
+                        continue
+                    else: # 如果finish，那么就不需要加载了
+                        break
+                else: # 如果loading，那么就等一等
+                    time.sleep(2)
+                    continue
+            else: # 
                 try:
                     btn_more.click()
-                    INFO('clicked load')
-                    time.sleep(2)
-                    return 1
                 except EX.ElementNotVisibleException:
-                    WARN(traceback.format_exc())
-                    time.sleep(2)
+                    pass
                 except EX.ElementClickInterceptedException:
-                    WARN(traceback.format_exc())
-                    time.sleep(2)
-            elif self._is_loading:
-                INFO('loading')
+                    pass
+
+
+    '''一直点击加载更多，直到加载完毕'''
+    def LoadMore(self):
+        count = 0
+        while True:
+            try:
+                self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                btn_more = self.browser.find_element_by_css_selector('div#loadMore button.btn')
+                btn_more.click()
+                LOG('Loading More')
+                time.sleep(4)
+                continue
+            except EX.NoSuchElementException:
+                LOG('Still Loading || All Loading Over:')
                 try:
-                    _loading = self.browser.find_element_by_css_selector('div#loadMore div.dropload-load span.loading')
-                except EX.NoSuchElementException:
+                    self.browser.find_element_by_css_selector('div#loadMore div.dropload-load span.loading')
+                    LOG('    Still Loading')
+                    time.sleep(6)
+                    count += 1
+                    if count == 3:
+                        count = 0
+                        self.browser.find_element_by_css_selector('div#loadMore').click()
                     continue
-                else:
+                except EX.NoSuchElementException:
                     try:
-                        self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
-                        _loading.click()
-                    except EX.ElementClickInterceptedException:
-                        pass
-                    except EX.ElementNotVisibleException:
-                        pass
-                time.sleep(5)
-
-    '''一次性加载完'''
-    def LoadAll(self):
-        while not self._is_loadfinish:
-            self.Load()
+                        self.browser.find_element_by_css_selector('div#loadMore div.dropload-down div.dropload-noData')
+                        LOG('    All Loading Over')
+                        break
+                    except EX.NoSuchElementException:
+                        LOG('    Maybe Loading Over')
+                        time.sleep(2)
+                        continue
     
-    '''加载直到某个item的data-src出现'''
-    def LoadUntil(self, bp):
-        downloaded = self.Downloaded
-        last_found = ''
-        while not self._is_loadfinish:
-            self.Load()
-            img_wraps = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item div.img-wrap')
-            img_wraps.reverse() # 反转列表，从下往上开始遍历
-            for wrap in img_wraps:# 遍历已经加载出来的项目，看断点是否已经加载出来
-                target = wrap.get_attribute('data-src').split('/')[-1].split('?')[0]
-                if target in downloaded:
-                    last_found = target
-                elif last_found != '':
-                    self.download_info['dn-first'] = last_found
-                    return 1
-            
-
+    def LoadUntil(self):
+        count = 0
+        while True:
+            try:
+                is_loaded = False
+                dn_first = self.download_info['dn-first']
+                img_wraps = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item div.img-wrap')
+                for wrap in img_wraps:
+                    src = wrap.get_attribute('data-src')
+                    src = src.split('/')[-1].split('?')[0]
+                    if dn_first == src:
+                        LOG(F'Loaded Until BreakPoint: {dn_first}')
+                        is_loaded=True
+                        break
+                if is_loaded:
+                    break
+                self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                btn_more = self.browser.find_element_by_css_selector('div#loadMore button.btn')
+                btn_more.click()
+                LOG('Loading More')
+                time.sleep(4)
+                continue
+            except EX.NoSuchElementException:
+                LOG('Still Loading || All Loading Over:')
+                try:
+                    self.browser.find_element_by_css_selector('div#loadMore div.dropload-load span.loading')
+                    LOG('    Still Loading')
+                    time.sleep(6)
+                    count += 1
+                    if count == 3:
+                        count = 0
+                        self.browser.find_element_by_css_selector('div#loadMore').click()
+                    continue
+                except EX.NoSuchElementException:
+                    try:
+                        self.browser.find_element_by_css_selector('div#loadMore div.dropload-down div.dropload-noData')
+                        LOG('    All Loading Over')
+                        break
+                    except EX.NoSuchElementException:
+                        LOG('    Maybe Loading Over')
+                        time.sleep(2)
+                        continue
 
     '''判断该项是否是视频'''
     def IsVideo(self, item):
@@ -230,7 +223,7 @@ class InsStar(object):
         dn_last = self.download_info['dn-last']
         if dn_last == 'null':# 第一次下载该用户
             LOG(F'First Download This User: <{self.user}>')
-            self.LoadAll()  # 一次性将所有的项目加载完
+            self.LoadMore()  # 一次性将所有的项目加载完
             items = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item')
             items.reverse()
             self.download_info['dn-last'] = items[0].find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
