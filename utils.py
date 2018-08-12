@@ -2,6 +2,8 @@ import json
 import pathlib
 import hashlib
 import time
+from colorama import init, Fore
+init(autoreset=True)
 
 def LOG(what):
     tm = time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time()))
@@ -11,8 +13,7 @@ def INFO(what):
     LOG(F'INFO: {what}')
 
 def WARN(what):
-    LOG(F'WARN:'
-                '{what}')
+    LOG(F'{Fore.RED}WARN: {what}')
 
 class Utils(object):
     '''对用户名MD5，防止某些字符不能作为文件夹名，以MD5作为文件夹名'''
@@ -108,4 +109,4 @@ class Utils(object):
         fl = open(path,'wb')
         fl.write(data)
         fl.close()
-        LOG(F'{usermd5}/{name} saved')
+        INFO(F'Media {usermd5}/{name} saved')

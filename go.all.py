@@ -21,6 +21,8 @@ import hashlib as hashlib
 import traceback
 import copy
 import json
+from colorama import init, Fore
+init(autoreset=True)
 
 import utils
 
@@ -63,7 +65,7 @@ class InsStar(object):
         tmp.extend(list(path.glob('*.png')))
         x = []
         for item in tmp:
-            x.append(item.as_posix().split('./')[-1])
+            x.append(item.as_posix().split('/')[-1])
         return x
     
     '''是否可以加载'''
@@ -90,55 +92,70 @@ class InsStar(object):
     @property
     def _is_loadfinish(self):
         try:
-            _finish = self.browser.find_element_by_css_selector('div#loadMore div.dropload-down div.dropload-noData')
+            _finish = self.browser.find_element_by_css_selector('div#loadMore div.dropload-noData')
         except EX.NoSuchElementException:
             return False
         else:
-            True
+            return True
+
+    def _scrollBottom(self):
+        self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
 
     '''加载一次'''
     def Load(self):
         while True:
+            self._scrollBottom()    
             if self._is_loadable:
-                self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(1)
-                btn_more = self.browser.find_element_by_css_selector('div#loadMore button.btn')
                 INFO('loadable')
+                self._scrollBottom()
+                time.sleep(1)
                 try:
-                    self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                    try:
+                        self._close_modal()
+                    except:
+                        pass
+                    btn_more = self.browser.find_element_by_css_selector('div#loadMore button.btn')
                     btn_more.click()
                     INFO('clicked load')
                     time.sleep(1)
+                    self._scrollBottom()
                     return 1
+                except EX.NoSuchElementException:
+                    WARN('Button <加载更多> Vanished')
+                    exit(0)
                 except EX.ElementNotVisibleException:
-                    WARN(traceback.format_exc())
-                    time.sleep(2)
+                    WARN('Button <加载更多> Not Visible')
                 except EX.ElementClickInterceptedException:
-                    WARN(traceback.format_exc())
-                    time.sleep(2)
+                    WARN('Button <加载更多> Unclickable')
             elif self._is_loading:
                 INFO('loading')
+                self._scrollBottom()
                 try:
                     _loading = self.browser.find_element_by_css_selector('div#loadMore div.dropload-load span.loading')
+                    _loading.click()
                 except EX.NoSuchElementException:
+                    WARN('Button <正在加载> Vanished，maybe loading finished or load finished')
+                except EX.ElementClickInterceptedException:
+                    WARN('Button <正在加载> Unclickable')
+                except EX.ElementNotVisibleException:
+                    WARN('Button <正在加载> Not Visible')
+                finally:
+                    self._scrollBottom()
+                    time.sleep(5)
+                    self._scrollBottom()
                     return 1
-                else:
-                    try:
-                        self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
-                        _loading.click()
-                    except EX.ElementClickInterceptedException:
-                        pass
-                    except EX.ElementNotVisibleException:
-                        pass
-                time.sleep(5)
+            elif self._is_loadfinish:
+                INFO('Load Finished，no need load more')
+                return 1
 
     '''一次性加载完'''
     def LoadAll(self):
         while not self._is_loadfinish:
             self.Load()
+        INFO('All Load Finished')
     
     '''加载直到某个item的data-src出现'''
-    def LoadUntil(self):
+    def LoadUntil(self, bp):
         downloaded = self.Downloaded
         last_found = ''
         while not self._is_loadfinish:
@@ -147,10 +164,15 @@ class InsStar(object):
             img_wraps.reverse() # 反转列表，从下往上开始遍历
             for wrap in img_wraps:# 遍历已经加载出来的项目，看断点是否已经加载出来
                 target = wrap.get_attribute('data-src').split('/')[-1].split('?')[0]
-                if target in downloaded:
+                if bp == target:
+                    INFO(F'Found BreakPoint: {target}')
+                    self.download_info['dn-first'] = target
+                    return 1
+                elif target in downloaded:
                     last_found = target
                 elif last_found != '':
                     self.download_info['dn-first'] = last_found
+                    INFO(F'Found BreakPoint: {last_found}')
                     return 1
             
     '''判断该项是否是视频'''
@@ -195,51 +217,6 @@ class InsStar(object):
         group_next.click()
         INFO("Loading Group's Next One.......")
 
-    '''下载视频'''
-    def DownloadVideo(self):
-        video_url = self.WaitVideo().get_attribute('src')
-        name = video_url.split('/')[-1].split('?')[0]
-        data = self.RequestData(video_url)
-        Utils.SaveMedia(self.md5, name, data)
-        INFO(F'Video Donwloaded: {name}')
-
-    '''下载图片组'''
-    def DownloadGroup(self):
-        while True:
-            name, data = self.DownloadSingle()
-            Utils.SaveMedia(self.md5, name, data)
-            INFO(F'One of Group Downloaded: {name}')
-            lis = self.browser.find_elements_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper ol.carousel-indicators li')
-            if 'active' in lis[-1].get_attribute('class'):
-                INFO('Group Download Finish')
-                break
-            self.GroupNext()
-
-    '''下载单个图片'''
-    def DownloadSingle(self):
-        img_url = self.browser.find_element_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper img').get_attribute('src')
-        name = img_url.split('/')[-1].split('?')[0]
-        data = self.RequestData(img_url)
-        return (name, data)
-
-    def _download(self, items):
-        for item in items:
-            self._open_modal(item) # 打开modal
-            if self.IsVideo(item):
-                self.DownloadVideo()
-            elif self.IsGroup(item):
-                self.DownloadGroup()
-            else:
-                name, data = self.DownloadSingle()
-                Utils.SaveMedia(self.md5, name, data)
-                INFO('Pic Downloaded')
-            self._close_modal() # 关闭modal
-            self.download_info['dn-first'] = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
-            time.sleep(1)
-        self.download_info['is-dn-finish'] = 'yes'
-        INFO('All Dwonload Finished')
-        self.browser.quit()
-
     def RequestData(self, url):
         headers = {
             'Accept': 'text/html, application/xhtml+xml, application/xml; q=0.9, */*; q=0.8',
@@ -251,8 +228,68 @@ class InsStar(object):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/17.17134'
         }
         req = urllib.request.Request(url=url, headers=headers)
-        data = urllib.request.urlopen(req).read()
+        INFO(F'Requesting: {url}')
+        try:
+            data = urllib.request.urlopen(req).read()
+        except urllib.error.HTTPError as ex:
+            WARN(ex.msg)
+            return None
         return data
+
+    '''下载视频'''
+    def DownloadVideo(self):
+        video_url = self.WaitVideo().get_attribute('src')
+        name = video_url.split('/')[-1].split('?')[0]
+        data = self.RequestData(video_url)
+        if data is None:
+            WARN('Video Fetch Failed')
+            return
+        Utils.SaveMedia(self.md5, name, data)
+        INFO(F'Video Donwloaded: {name}')
+
+    '''下载图片组'''
+    def DownloadGroup(self):
+        while True:
+            name, data = self.DownloadSingle()
+            if data is None:
+                return 1
+            Utils.SaveMedia(self.md5, name, data)
+            INFO(F'One of Group Downloaded: {name}')
+            time.sleep(2)
+            lis = self.browser.find_elements_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper ol.carousel-indicators li')
+            if 'active' in lis[-1].get_attribute('class'):
+                INFO('Group Download Finish')
+                break
+            self.GroupNext()
+
+    '''下载单个图片'''
+    def DownloadSingle(self):
+        img_url = self.browser.find_element_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper img').get_attribute('src')
+        name = img_url.split('/')[-1].split('?')[0]
+        data = self.RequestData(img_url)
+        if data is None:
+            WARN('Image Fetch Failed')
+            return (name, None)
+        return (name, data)
+
+    def _download(self, items):
+        for item in items:
+            self._open_modal(item) # 打开modal
+            if self.IsVideo(item):
+                self.DownloadVideo()
+            elif self.IsGroup(item):
+                self.DownloadGroup()
+            else:
+                INFO('This is single pic')
+                name, data = self.DownloadSingle()
+                if data != None:
+                    Utils.SaveMedia(self.md5, name, data)
+            self._close_modal() # 关闭modal
+            self.download_info['dn-first'] = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
+            time.sleep(1)
+        self.download_info['is-dn-finish'] = 'yes'
+        INFO('All Dwonload Finished')
+        self.browser.quit()
 
     def _open_modal(self, item):
         try:
@@ -282,7 +319,7 @@ class InsStar(object):
             WARN('Close button Unclickable')
             exit(0)
         except EX.ElementNotVisibleException:
-            WARN('CLose button not visible')
+            WARN('Close button not visible')
             exit(0)
 
     '''启动下载'''
@@ -305,15 +342,16 @@ class InsStar(object):
                 Utils.UpdateUserInfo(self.md5, self.download_info)
         elif self.download_info['is-dn-finish'] == 'not': # 如果不是第一次下载，且上一次还没有下载完
             INFO(F"BreakPoint: {self.download_info['dn-first']}")
-            self.LoadUntil() # 加载到上次的断点
+            self.LoadUntil(self.download_info['dn-first']) # 加载到上次的断点
             items = self.browser.find_elements_by_css_selector('div#list div.col-md-4 div.item')
             items.reverse()
             self.download_info['dn-last'] = self.download_info['dn-first']
             try:
                 new_items = []
+                saved = self.Downloaded
                 for item in items:
                     name = item.find_element_by_css_selector('div.img-wrap').get_attribute('data-src').split('/')[-1].split('?')[0]
-                    if self.download_info['dn-last'] != name:
+                    if (name not in saved) and (name != self.download_info['dn-first']):
                         new_items.append(item)
                 self._download(new_items)
             except Exception:
@@ -324,7 +362,11 @@ class InsStar(object):
 
 
 if __name__ == '__main__':
-    uid = 'pei716'
-    test = InsStar(uid)
-    test.BrowseUser()
-    test.StartDownload()
+    try:
+        uid = 'cbbheree'
+        test = InsStar(uid)
+        test.BrowseUser()
+        test.StartDownload()
+    except:
+        Utils.UpdateUserInfo(test.md5, test.download_info)
+        WARN(traceback.format_exc())
