@@ -5,15 +5,22 @@ import time
 from colorama import init, Fore
 init(autoreset=True)
 
-def LOG(what):
+def LOG(what,color=None):
     tm = time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time()))
-    print(F'[{tm}] -- {what}')
+    if color:
+        print(F'[{tm}] -- {color}{what}')
+    else:
+        print(F'[{tm}] -- {what}')
 
-def INFO(what):
-    LOG(F'INFO: {what}')
+def INFO(what,color=None):
+    if color:
+        LOG(F'INFO: {what}',color=color)
+    else:
+        LOG(F'INFO: {what}')
 
-def WARN(what):
-    LOG(F'{Fore.RED}WARN: {what}')
+def WARN(what,color=Fore.RED):
+    LOG(F'WARN: {what}',color=color)
+
 
 class Utils(object):
     '''对用户名MD5，防止某些字符不能作为文件夹名，以MD5作为文件夹名'''

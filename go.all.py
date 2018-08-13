@@ -6,6 +6,10 @@
     2.上一次全部下载完后，下载新增的帖子
 '''
 
+'''FIXME:
+    1.一个组可能既包含视频也包含图片
+'''
+
 from selenium import webdriver
 import selenium.common.exceptions as EX
 from selenium.webdriver.common.by import By
@@ -42,9 +46,9 @@ class InsStar(object):
         self.browser = webdriver.Chrome()
         self.download_info = Utils.GetUserInfo(md5)
 
-    '''打开用户页面,http://www.insstar.cn/{user}'''
+    '''打开用户页面,http://www.veryins.com/{user}'''
     def BrowseUser(self):
-        url = F'http://www.insstar.cn/{self.user}'
+        url = F'http://www.veryins.com/{self.user}'
         self.browser.get(url)
         try:
             _x = WebDriverWait(self.browser, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'div#loadMore button.btn')))
@@ -53,6 +57,8 @@ class InsStar(object):
             self.browser.quit()
         else:
             self.browser.maximize_window()
+            self.browser.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+
 
     '''所有已下载的文件名'''
     @property
@@ -179,34 +185,38 @@ class InsStar(object):
     def IsVideo(self, img_wrap):
         try:
             img_wrap.find_element_by_css_selector('img.videocam')
-            INFO('Found Video')
+            INFO('Found Video',color=Fore.CYAN)
             return True
         except EX.NoSuchElementException:
             return False
 
     '''等待视频加载，并返回source'''
     def WaitVideo(self):
-        INFO('Wait For Video Load..........')
+        count = 2
         # 等待视频加载出来后才有video标签
         while True:
+            INFO('Video Loading......')
             try:
                 video = self.browser.find_element_by_css_selector('div#gallery-modal div.img-container div.article video source')
                 INFO('Video Loaded')
                 return video
             except EX.NoSuchElementException:
+                if count <= 0:
+                    raise EX.NoSuchElementException
+                count -= 1
                 time.sleep(2)
                 continue
 
-    '''判断是否是图片组'''
+    '''判断是否是组'''
     def IsGroup(self, img_wrap):
         try:
             img_wrap.find_element_by_css_selector('img.sidecar')
-            INFO('Found Group')
+            INFO('Found Group',color=Fore.CYAN)
             return True
         except EX.NoSuchElementException:
             return False
 
-    '''加载图片组的下一项'''
+    '''加载组的下一项'''
     def GroupNext(self):
         # 点击时需将display设为block
         scriptp = "document.querySelector('div#gallery-modal div.img-container div.article div.imgwrapper div.slides-controler a.pre').style.display='block';"
@@ -247,14 +257,17 @@ class InsStar(object):
         Utils.SaveMedia(self.md5, name, data)
         INFO(F'Video Donwloaded: {name}')
 
-    '''下载图片组'''
+    '''下载组'''
     def DownloadGroup(self):
         while True:
-            name, data = self.DownloadSingle()
-            if data is None:
-                return 1
-            Utils.SaveMedia(self.md5, name, data)
-            INFO(F'One of Group Downloaded: {name}')
+            try:
+                self.DownloadVideo()
+            except EX.NoSuchElementException:
+                name, data = self.DownloadSingle()
+                if data is None:
+                    return 1
+                Utils.SaveMedia(self.md5, name, data)
+                INFO(F'One of Group Downloaded: {name}')
             time.sleep(2)
             lis = self.browser.find_elements_by_css_selector('div#gallery-modal div.img-container div.article div.imgwrapper ol.carousel-indicators li')
             if 'active' in lis[-1].get_attribute('class'):
@@ -363,7 +376,7 @@ class InsStar(object):
 
 if __name__ == '__main__':
     try:
-        uid = 'cbbheree'
+        uid = '_reiikoyuii'
         test = InsStar(uid)
         test.BrowseUser()
         test.StartDownload()
